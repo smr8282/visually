@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>시각장애 체험 시뮬레이터</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;600;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #080c10;
+    --surface: #0f1419;
+    --surface2: #161d26;
+    --border: #1e2d3d;
+    --accent: #00b4d8;
+    --accent2: #90e0ef;
+    --text: #caf0f8;
+    --muted: #5a7a8a;
+  }
+
+  body {
+    font-family: 'Noto Sans KR', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* === SPLASH === */
+  #splash {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 200; gap: 14px; padding: 36px;
+    transition: opacity 0.7s ease;
+  }
+  #splash::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse 70% 60% at 50% 40%, rgba(0,180,216,0.08) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .splash-icon {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(0,180,216,0.2), rgba(144,224,239,0.1));
+    border: 1.5px solid rgba(0,180,216,0.4);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 34px;
+    animation: pulse 2.5s ease-in-out infinite;
+    box-shadow: 0 0 30px rgba(0,180,216,0.2);
+  }
+  @keyframes pulse { 0%,100%{transform:scale(1);box-shadow:0 0 30px rgba(0,180,216,0.2);} 50%{transform:scale(1.06);box-shadow:0 0 50px rgba(0,180,216,0.35);} }
+  #splash h1 {
+    font-size: 22px; font-weight: 900;
+    text-align: center; line-height: 1.4;
+    letter-spacing: -0.3px;
+  }
+  #splash h1 em { color: var(--accent); font-style: normal; }
+  #splash .sub {
+    font-size: 12px; color: var(--muted);
+    text-align: center; line-height: 1.8;
+    max-width: 290px;
+  }
+  .splash-tags {
+    display: flex; flex-wrap: wrap; justify-content: center;
+    gap: 6px; max-width: 300px;
+  }
+  .splash-tag {
+    padding: 4px 10px; border-radius: 20px;
+    border: 1px solid var(--border);
+    font-size: 11px; color: var(--muted);
+  }
+  #start-btn {
+    margin-top: 8px;
+    background: linear-gradient(135deg, var(--accent), #0077b6);
+    color: white; border: none;
+    padding: 14px 44px; border-radius: 50px;
+    font-size: 15px; font-weight: 700;
+    font-family: inherit; cursor: pointer;
+    box-shadow: 0 0 30px rgba(0,180,216,0.35);
+    transition: transform 0.15s;
+  }
+  #start-btn:active { transform: scale(0.96); }
+
+  /* === CAMERA === */
+  #camera-wrapper {
+    position: relative; flex: 1;
+    overflow: hidden; background: #000;
+    min-height: 0;
+  }
+  video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  svg.defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+  /* Video base filters */
+  video.f-blur        { filter: blur(4px) brightness(0.92); }
+  video.f-blur-mild   { filter: blur(2px) brightness(0.95) saturate(0.8); }
+  video.f-dark        { filter: brightness(0.3) contrast(1.2); }
+  video.f-desat       { filter: saturate(0) brightness(0.9) contrast(1.1); }
+  video.f-desat-mild  { filter: saturate(0.2) brightness(0.85); }
+  video.f-contrast    { filter: contrast(1.3) brightness(0.9); }
+
+  /* Overlays */
+  .overlay { position: absolute; inset: 0; pointer-events: none; display: none; }
+
+  /* 건강한 시력 - 깨끗 */
+
+  /* 시력장애 - 전체 흐림 + 중심부 더 흐림 */
+  #va-overlay {
+    background: radial-gradient(ellipse 40% 40% at 50% 50%,
+      rgba(255,255,255,0.06) 0%, rgba(200,200,200,0.1) 50%,
+      rgba(150,150,150,0.18) 100%);
+  }
+
+  /* 시야장애 - 주변부 암점 (터널) */
+  #vf-overlay {
+    background: radial-gradient(ellipse 40% 40% at 50% 50%,
+      transparent 0%, transparent 32%,
+      rgba(0,0,0,0.5) 52%, rgba(0,0,0,0.88) 68%, #000 82%);
+  }
+
+  /* 광각장애 - 빛 번짐(광과민) */
+  #lv-overlay {
+    background:
+      radial-gradient(ellipse 80% 80% at 50% 50%, rgba(255,255,220,0.28) 0%, transparent 60%),
+      radial-gradient(ellipse 30% 30% at 50% 50%, rgba(255,255,255,0.22) 0%, transparent 100%);
+    mix-blend-mode: screen;
+    animation: glare 3s ease-in-out infinite;
+  }
+  @keyframes glare {
+    0%,100%{opacity:0.7;} 50%{opacity:1;}
+  }
+
+  /* 색각장애 - 색맹 (SVG filter 사용) */
+  #cv-video-wrap { position:absolute;inset:0; display:none; }
+  #cv-video-wrap video { filter: url(#colorblind); }
+
+  /* 굴절장애 - 근시/원시 복합 흐림 */
+  #rf-overlay {
+    background: radial-gradient(ellipse 35% 35% at 50% 50%,
+      transparent 0%, rgba(0,0,0,0.05) 30%,
+      rgba(0,0,0,0.22) 65%, rgba(0,0,0,0.5) 100%);
+  }
+
+  /* 터널시야 - 극단적 터널 */
+  #tv-overlay {
+    background: radial-gradient(ellipse 22% 22% at 50% 50%,
+      transparent 0%, transparent 15%,
+      rgba(0,0,0,0.65) 35%, rgba(0,0,0,0.93) 55%, #000 70%);
+  }
+
+  /* 복시장애 - 이중 그림자 */
+  #dp-overlay {
+    position: absolute; inset: 0; pointer-events: none; display: none;
+    background: inherit;
+  }
+
+  /* 조절장애 - 초점 불안정 */
+  #ac-overlay { overflow: hidden; }
+
+  /* 양안시장애 - 이중 시야 */
+  #bin-overlay { overflow: hidden; }
+  #bin-clone {
+    position: absolute; inset: 0;
+    pointer-events: none; display: none;
+    overflow: hidden;
+  }
+  #bin-clone video {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    opacity: 0.55;
+    transform: translate(18px, 12px);
+    mix-blend-mode: screen;
+    filter: brightness(0.9);
+  }
+
+  /* 광각장애 광선 */
+  #lv-rays {
+    position: absolute; inset: 0;
+    pointer-events: none; display: none;
+    background:
+      conic-gradient(from 0deg at 50% 50%,
+        transparent 0deg, rgba(255,255,220,0.06) 3deg, transparent 6deg,
+        transparent 60deg, rgba(255,255,220,0.05) 63deg, transparent 66deg,
+        transparent 120deg, rgba(255,255,220,0.07) 123deg, transparent 126deg,
+        transparent 180deg, rgba(255,255,220,0.05) 183deg, transparent 186deg,
+        transparent 240deg, rgba(255,255,220,0.06) 243deg, transparent 246deg,
+        transparent 300deg, rgba(255,255,220,0.07) 303deg, transparent 306deg
+      );
+    mix-blend-mode: screen;
+    animation: rotateRay 20s linear infinite;
+  }
+  @keyframes rotateRay { from{transform:rotate(0deg);} to{transform:rotate(360deg);} }
+
+  /* 조절장애 - 파동 흐림 */
+  #ac-wave {
+    position: absolute; inset: 0;
+    pointer-events: none; display: none;
+    animation: waveFocus 2.5s ease-in-out infinite;
+  }
+  @keyframes waveFocus {
+    0%,100% { backdrop-filter: blur(0px); opacity: 0; }
+    40%,60% { backdrop-filter: blur(3.5px); opacity: 1; }
+  }
+
+  /* === MODE LABEL (camera top) === */
+  #mode-badge {
+    position: absolute; top: 12px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: 12px; font-weight: 700;
+    color: var(--accent2);
+    white-space: nowrap;
+    z-index: 10;
+    display: none;
+  }
+
+  /* === UI PANEL === */
+  #ui-panel {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 10px 12px 12px;
+    flex-shrink: 0;
+  }
+
+  /* 2행 5열 그리드 */
+  .tabs-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 5px;
+    margin-bottom: 9px;
+  }
+
+  .tab {
+    padding: 7px 3px;
+    border-radius: 10px;
+    border: 1.5px solid var(--border);
+    background: var(--surface2);
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 10px; font-weight: 700;
+    cursor: pointer;
+    text-align: center;
+    line-height: 1.35;
+    transition: all 0.2s;
+  }
+  .tab span { display: block; font-size: 14px; margin-bottom: 2px; }
+
+  .tab[data-mode="healthy"].active   { border-color:#4ade80; background:rgba(74,222,128,0.12); color:#4ade80; }
+  .tab[data-mode="va"].active        { border-color:#a78bfa; background:rgba(167,139,250,0.12); color:#a78bfa; }
+  .tab[data-mode="vf"].active        { border-color:#fb923c; background:rgba(251,146,60,0.12);  color:#fb923c; }
+  .tab[data-mode="tv"].active        { border-color:#f97316; background:rgba(249,115,22,0.12);  color:#f97316; }
+  .tab[data-mode="dp"].active        { border-color:#e879f9; background:rgba(232,121,249,0.12); color:#e879f9; }
+  .tab[data-mode="lv"].active        { border-color:#fde68a; background:rgba(253,230,138,0.12); color:#fde68a; }
+  .tab[data-mode="cv"].active        { border-color:#f472b6; background:rgba(244,114,182,0.12); color:#f472b6; }
+  .tab[data-mode="rf"].active        { border-color:#60a5fa; background:rgba(96,165,250,0.12);  color:#60a5fa; }
+  .tab[data-mode="ac"].active        { border-color:#34d399; background:rgba(52,211,153,0.12);  color:#34d399; }
+  .tab[data-mode="bin"].active       { border-color:#f87171; background:rgba(248,113,113,0.12); color:#f87171; }
+
+  /* Info card */
+  .info-card {
+    background: var(--surface2);
+    border-radius: 10px;
+    padding: 9px 12px;
+    border-left: 3px solid var(--accent);
+    display: flex; gap: 10px; align-items: flex-start;
+  }
+  .info-icon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
+  .info-body {}
+  .disease-name { font-size: 13px; font-weight: 900; margin-bottom: 2px; }
+  .disease-desc { font-size: 11px; color: var(--muted); line-height: 1.6; }
+
+  .mode-info { display: none; }
+  .mode-info.active { display: block; }
+
+  .mode-info[data-mode="healthy"] .info-card { border-left-color:#4ade80; }
+  .mode-info[data-mode="healthy"] .disease-name { color:#4ade80; }
+  .mode-info[data-mode="va"]  .info-card { border-left-color:#a78bfa; }
+  .mode-info[data-mode="va"]  .disease-name { color:#a78bfa; }
+  .mode-info[data-mode="vf"]  .info-card { border-left-color:#fb923c; }
+  .mode-info[data-mode="vf"]  .disease-name { color:#fb923c; }
+  .mode-info[data-mode="tv"]  .info-card { border-left-color:#f97316; }
+  .mode-info[data-mode="tv"]  .disease-name { color:#f97316; }
+  .mode-info[data-mode="dp"]  .info-card { border-left-color:#e879f9; }
+  .mode-info[data-mode="dp"]  .disease-name { color:#e879f9; }
+  .mode-info[data-mode="lv"]  .info-card { border-left-color:#fde68a; }
+  .mode-info[data-mode="lv"]  .disease-name { color:#fde68a; }
+  .mode-info[data-mode="cv"]  .info-card { border-left-color:#f472b6; }
+  .mode-info[data-mode="cv"]  .disease-name { color:#f472b6; }
+  .mode-info[data-mode="rf"]  .info-card { border-left-color:#60a5fa; }
+  .mode-info[data-mode="rf"]  .disease-name { color:#60a5fa; }
+  .mode-info[data-mode="ac"]  .info-card { border-left-color:#34d399; }
+  .mode-info[data-mode="ac"]  .disease-name { color:#34d399; }
+  .mode-info[data-mode="bin"] .info-card { border-left-color:#f87171; }
+  .mode-info[data-mode="bin"] .disease-name { color:#f87171; }
+
+  /* Loading / Error */
+  #cam-loading { position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#000;gap:14px; }
+  #cam-loading p { font-size:12px;color:var(--muted); }
+  .spinner { width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite; }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  #cam-error { position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:32px;gap:10px;background:#000; }
+  #cam-error .icon{font-size:44px;}
+  #cam-error p{font-size:13px;color:var(--muted);line-height:1.7;}
+</style>
+</head>
+<body>
+
+<!-- SVG filters for color blindness -->
+<svg class="defs" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 적록색맹 (Deuteranopia) -->
+    <filter id="colorblind">
+      <feColorMatrix type="matrix" values="
+        0.625 0.375 0   0 0
+        0.7   0.3   0   0 0
+        0     0.3   0.7 0 0
+        0     0     0   1 0"/>
+    </filter>
+  </defs>
+</svg>
+
+<!-- Splash -->
+<div id="splash">
+  <div class="splash-icon">👁</div>
+  <h1>시각장애인의 이해<br><em>시각장애 체험</em></h1>
+  <p class="sub">카메라를 통해 다양한 시각장애가<br>어떻게 보이는지 직접 체험해보세요</p>
+  <div class="splash-tags">
+    <span class="splash-tag">건강한 시력</span>
+    <span class="splash-tag">시력장애</span>
+    <span class="splash-tag">시야장애</span>
+    <span class="splash-tag">광각장애</span>
+    <span class="splash-tag">색각장애</span>
+    <span class="splash-tag">굴절장애</span>
+    <span class="splash-tag">조절장애</span>
+    <span class="splash-tag">양안시장애</span>
+  </div>
+  <button id="start-btn">체험 시작하기</button>
+</div>
+
+<!-- Camera -->
+<div id="camera-wrapper">
+  <div id="cam-loading">
+    <div class="spinner"></div>
+    <p>카메라 연결 중...</p>
+  </div>
+  <video id="video" autoplay playsinline muted></video>
+
+  <!-- 색각장애용 복제 비디오 -->
+  <div id="cv-video-wrap">
+    <video id="video2" autoplay playsinline muted></video>
+  </div>
+
+  <!-- 양안시장애용 복제 비디오 -->
+  <div id="bin-clone">
+    <video id="video3" autoplay playsinline muted></video>
+  </div>
+
+  <div id="va-overlay"  class="overlay"></div>
+  <div id="vf-overlay"  class="overlay"></div>
+  <div id="tv-overlay"  class="overlay"></div>
+  <div id="dp-clone"    style="position:absolute;inset:0;pointer-events:none;display:none;overflow:hidden;"></div>
+  <div id="lv-overlay"  class="overlay"></div>
+  <div id="lv-rays"></div>
+  <div id="rf-overlay"  class="overlay"></div>
+  <div id="ac-overlay"  class="overlay"></div>
+  <div id="ac-wave"></div>
+  <div id="bin-overlay" class="overlay"></div>
+
+  <div id="mode-badge"></div>
+
+  <div id="cam-error">
+    <div class="icon">📷</div>
+    <p>카메라에 접근할 수 없습니다.<br>브라우저에서 카메라 권한을<br>허용해 주세요.</p>
+  </div>
+</div>
+
+<!-- UI Panel -->
+<div id="ui-panel">
+  <div class="tabs-grid">
+    <button class="tab active" data-mode="healthy"><span>👁</span>건강한<br>시력</button>
+    <button class="tab" data-mode="va"><span>🌫</span>시력<br>장애</button>
+    <button class="tab" data-mode="vf"><span>🔦</span>시야<br>장애</button>
+    <button class="tab" data-mode="tv"><span>🕳</span>터널<br>시야</button>
+    <button class="tab" data-mode="dp"><span>👥</span>복시<br>장애</button>
+    <button class="tab" data-mode="lv"><span>✨</span>광각<br>장애</button>
+    <button class="tab" data-mode="cv"><span>🎨</span>색각<br>장애</button>
+    <button class="tab" data-mode="rf"><span>🔍</span>굴절<br>장애</button>
+    <button class="tab" data-mode="ac"><span>📷</span>조절<br>장애</button>
+    <button class="tab" data-mode="bin"><span>👀</span>양안시<br>장애</button>
+  </div>
+
+  <!-- Info cards -->
+  <div class="mode-info active" data-mode="healthy">
+    <div class="info-card">
+      <div class="info-icon">👁</div>
+      <div class="info-body">
+        <div class="disease-name">건강한 시력</div>
+        <div class="disease-desc">정상적인 시각 기능으로 사물을 선명하고 정확하게 볼 수 있는 상태입니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mode-info" data-mode="va">
+    <div class="info-card">
+      <div class="info-icon">🌫</div>
+      <div class="info-body">
+        <div class="disease-name">시력장애 (Visual Acuity)</div>
+        <div class="disease-desc">시력이 저하되어 사물이 전반적으로 흐릿하게 보입니다. 교정시력 0.02 미만이거나 두 눈 모두 시력이 현저히 낮은 상태입니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mode-info" data-mode="vf">
+    <div class="info-card">
+      <div class="info-icon">🔦</div>
+      <div class="info-body">
+        <div class="disease-name">시야장애 (Visual Field)</div>
+        <div class="disease-desc">주변부 시야가 차단되어 마치 터널 속에서 보는 것처럼 중심부만 보입니다. 두 눈 시야가 각각 중심 10° 이내인 상태입니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mode-info" data-mode="tv">
+    <div class="info-card">
+      <div class="info-icon">🕳</div>
+      <div class="info-body">
+        <div class="disease-name">터널시야 (Tunnel Vision)</div>
+        <div class="disease-desc">시야가 극도로 좁아져 마치 좁은 터널 끝을 통해 보는 것과 같은 상태입니다. 녹내장·망막색소변성증 말기에 나타나며 중심부 외 거의 모든 시야가 소실됩니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mode-info" data-mode="dp">
+    <div class="info-card">
+      <div class="info-icon">👥</div>
+      <div class="info-body">
+        <div class="disease-name">복시장애 (Diplopia)</div>
+        <div class="disease-desc">하나의 사물이 두 개로 겹쳐 보이는 상태입니다. 눈 근육 마비·사시·뇌신경 이상 등으로 두 눈의 시선이 일치하지 않아 발생합니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mode-info" data-mode="lv">
+    <div class="info-card">
+      <div class="info-icon">✨</div>
+      <div class="info-body">
+        <div class="disease-name">광각장애 (Light Sensitivity)</div>
+        <div class="disease-desc">빛에 극도로 민감하여 눈부심이 심하게 발생합니다. 밝은 환경에서 빛이 번지고 퍼져 사물 식별이 어렵습니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mode-info" data-mode="cv">
+    <div class="info-card">
+      <div class="info-icon">🎨</div>
+      <div class="info-body">
+        <div class="disease-name">색각장애 (Color Vision)</div>
+        <div class="disease-desc">특정 색상을 구분하지 못하거나 색이 다르게 보입니다. 가장 흔한 적록색맹(녹색·적색 구분 어려움)을 시뮬레이션합니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mode-info" data-mode="rf">
+    <div class="info-card">
+      <div class="info-icon">🔍</div>
+      <div class="info-body">
+        <div class="disease-name">굴절장애 (Refractive Error)</div>
+        <div class="disease-desc">근시·원시·난시 등 눈의 굴절 이상으로 상이 망막에 정확히 맺히지 않아 주변부가 흐리게 보입니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mode-info" data-mode="ac">
+    <div class="info-card">
+      <div class="info-icon">📷</div>
+      <div class="info-body">
+        <div class="disease-name">조절장애 (Accommodation)</div>
+        <div class="disease-desc">수정체의 두께를 조절하는 기능이 저하되어 초점이 맞지 않습니다. 시야가 주기적으로 흐려졌다 선명해지기를 반복합니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mode-info" data-mode="bin">
+    <div class="info-card">
+      <div class="info-icon">👀</div>
+      <div class="info-body">
+        <div class="disease-name">양안시장애 (Binocular Vision)</div>
+        <div class="disease-desc">두 눈의 협조 기능 이상으로 사물이 이중으로 보입니다(복시). 두 눈의 상이 하나로 합쳐지지 않아 입체감과 거리감이 상실됩니다.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const video      = document.getElementById('video');
+const video2     = document.getElementById('video2');
+const video3     = document.getElementById('video3');
+const splash     = document.getElementById('splash');
+const startBtn   = document.getElementById('start-btn');
+const camError   = document.getElementById('cam-error');
+const camLoading = document.getElementById('cam-loading');
+const tabs       = document.querySelectorAll('.tab');
+const modeInfos  = document.querySelectorAll('.mode-info');
+const modeBadge  = document.getElementById('mode-badge');
+const cvWrap     = document.getElementById('cv-video-wrap');
+const binClone   = document.getElementById('bin-clone');
+const acWave     = document.getElementById('ac-wave');
+const lvRays     = document.getElementById('lv-rays');
+
+const overlays = {
+  va:  document.getElementById('va-overlay'),
+  vf:  document.getElementById('vf-overlay'),
+  tv:  document.getElementById('tv-overlay'),
+  lv:  document.getElementById('lv-overlay'),
+  rf:  document.getElementById('rf-overlay'),
+  ac:  document.getElementById('ac-overlay'),
+  bin: document.getElementById('bin-overlay'),
+};
+const dpClone = document.getElementById('dp-clone');
+
+const modeLabels = {
+  healthy: '👁 건강한 시력',
+  va:  '🌫 시력장애',
+  vf:  '🔦 시야장애',
+  tv:  '🕳 터널시야',
+  dp:  '👥 복시장애',
+  lv:  '✨ 광각장애',
+  cv:  '🎨 색각장애',
+  rf:  '🔍 굴절장애',
+  ac:  '📷 조절장애',
+  bin: '👀 양안시장애',
+};
+
+let acInterval = null;
+
+function applyMode(mode) {
+  // Reset
+  video.className = '';
+  Object.values(overlays).forEach(o => o.style.display = 'none');
+  cvWrap.style.display = 'none';
+  binClone.style.display = 'none';
+  dpClone.style.display = 'none';
+  acWave.style.display = 'none';
+  lvRays.style.display = 'none';
+  if (acInterval) { clearInterval(acInterval); acInterval = null; }
+
+  // Apply
+  if (mode === 'va') {
+    video.className = 'f-blur';
+    overlays.va.style.display = 'block';
+  } else if (mode === 'vf') {
+    overlays.vf.style.display = 'block';
+  } else if (mode === 'tv') {
+    overlays.tv.style.display = 'block';
+  } else if (mode === 'dp') {
+    // 복시: 비디오 위에 반투명 복제 이미지를 어긋나게 표시
+    dpClone.style.display = 'block';
+    dpClone.innerHTML = '';
+    const ghost = document.createElement('video');
+    ghost.autoplay = true; ghost.playsInline = true; ghost.muted = true;
+    ghost.style.cssText = 'width:100%;height:100%;object-fit:cover;position:absolute;inset:0;opacity:0.45;transform:translate(22px,16px);mix-blend-mode:screen;filter:brightness(0.85);';
+    dpClone.appendChild(ghost);
+    if (video.srcObject) ghost.srcObject = video.srcObject;
+  } else if (mode === 'lv') {
+    video.className = 'f-dark';
+    overlays.lv.style.display = 'block';
+    lvRays.style.display = 'block';
+  } else if (mode === 'cv') {
+    cvWrap.style.display = 'block';
+    video.style.opacity = '0';
+  } else if (mode === 'rf') {
+    video.className = 'f-blur-mild';
+    overlays.rf.style.display = 'block';
+  } else if (mode === 'ac') {
+    acWave.style.display = 'block';
+  } else if (mode === 'bin') {
+    binClone.style.display = 'block';
+  }
+
+  if (mode !== 'cv') video.style.opacity = '1';
+
+  // Badge
+  modeBadge.style.display = mode === 'healthy' ? 'none' : 'block';
+  modeBadge.textContent = modeLabels[mode] || '';
+
+  // Tabs & info
+  tabs.forEach(t => t.classList.toggle('active', t.dataset.mode === mode));
+  modeInfos.forEach(m => m.classList.toggle('active', m.dataset.mode === mode));
+}
+
+async function startCamera() {
+  splash.style.opacity = '0';
+  setTimeout(() => splash.style.display = 'none', 700);
+
+  try {
+    const constraints = {
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+    video.srcObject = stream;
+    // 색각장애용 복제 스트림
+    const stream2 = await navigator.mediaDevices.getUserMedia(constraints);
+    video2.srcObject = stream2;
+    // 양안시용 복제 스트림
+    const stream3 = await navigator.mediaDevices.getUserMedia(constraints);
+    video3.srcObject = stream3;
+
+    video.onloadedmetadata = () => { camLoading.style.display = 'none'; };
+  } catch(e) {
+    console.error(e);
+    camLoading.style.display = 'none';
+    camError.style.display = 'flex';
+  }
+}
+
+startBtn.addEventListener('click', startCamera);
+tabs.forEach(tab => tab.addEventListener('click', () => applyMode(tab.dataset.mode)));
+applyMode('healthy');
+</script>
+</body>
+</html>
